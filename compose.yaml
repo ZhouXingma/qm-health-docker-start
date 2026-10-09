@@ -1,0 +1,175 @@
+# 本地环境编排：PostgreSQL + Redis + qm-health-rust + qm-health-ai
+# 用法（在 qm_health_docker_start/ 目录下）：
+#   cp .env.example .env    # 按需改密码
+#   docker compose up -d
+#
+# qm-health-ai 是私有包，首次启动前需先登录：docker login ghcr.io
+#
+# 版本由 .env 里的 POSTGRES_VERSION / REDIS_VERSION / RUST_VERSION / AI_VERSION 控制
+# （值即镜像 tag）。改完版本后 docker compose up -d 只会重建受影响的那个服务；
+# 若新版是 :latest 这类可变 tag，需先 docker compose pull <服务名> 才能拉到新镜像。
+#
+# 启动顺序：postgres/redis 健康 -> rust -> ai（ai 启动时要连 rust 拉 MCP 工具列表）
+#
+# PostgreSQL 和 Redis 的数据都放在同一个命名卷 qm_health 里，用子目录互相隔离：
+#   pgdata/  -> PostgreSQL 数据目录
+#   redis/   -> Redis 的 AOF 文件
+# 查看卷：docker volume inspect qm_health
+# 清空数据库重来：docker compose down && docker volume rm qm_health
+#
+# 两个应用的日志/文件各放独立的卷，与数据库数据解耦：
+#   qm_health_rust_data  -> rust 的 /data（logs + files）
+#   qm_health_ai_data    -> ai 的 /data/logs/qm-health-ai
+# 清空应用数据：docker compose down && docker volume rm qm_health_rust_data qm_health_ai_data
+
+name: qm_health_docker_start
+
+services:
+  postgres:
+    image: postgres:${POSTGRES_VERSION:-16.3}
+    # 容器名跟着版本走，升级后名字不会与实际版本对不上
+    container_name: postgres${POSTGRES_VERSION:-16.3}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-books123}
+      # 库名要和 envs/.env.* 里 db.url 的 .../qm_health 一致
+      POSTGRES_DB: ${POSTGRES_DB:-qm_health}
+      # 数据落在卷内的 pgdata/ 子目录，与 Redis 的 redis/ 子目录同级
+      PGDATA: /var/lib/postgresql/data/pgdata
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      # 与 Redis 共用命名卷 qm_health，靠 PGDATA 指定的子目录区分
+      - qm_health:/var/lib/postgresql/data
+      # 初始化脚本：只在数据目录为空（首次启动）时按文件名顺序执行一次
+      - ./init-sql:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - qm_health_docker_start
+
+  redis:
+    image: redis:${REDIS_VERSION:-8.6.0}
+    container_name: redis${REDIS_VERSION:-8.6.0}
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /data/redis
+        exec redis-server --appendonly yes --dir /data/redis --requirepass "$$REDIS_PASSWORD"
+    environment:
+      # 密码与 postgres 保持一致
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-books123}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      # 同一个命名卷，数据写进 redis/ 子目录
+      - qm_health:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - qm_health_docker_start
+
+  qm-health-rust:
+    image: ghcr.io/zhouxingma/qm-health-rust:${RUST_VERSION:-latest}
+    container_name: qm-health-rust
+    restart: unless-stopped
+    depends_on:
+      # 等数据库和 Redis 通过 healthcheck 后再启动，避免应用启动期连接失败
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # 用 compose 服务名互访，不要写 localhost / 127.0.0.1（容器内指向自身）
+      DB_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-books123}@postgres:5432/${POSTGRES_DB:-qm_health}
+      # 库号不要写在 URL 里：普通库 / 管理员库分别由 REDIS_DB(默认 0) / ADMIN_REDIS_DB(默认 1) 指定
+      REDIS_URL: redis://:${REDIS_PASSWORD:-books123}@redis:6379
+      LOG_LEVEL: ${RUST_LOG_LEVEL:-info}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      # 容器内固定监听 8080（镜像默认 SERVER_PORT），宿主机端口由 RUST_PORT 决定
+      - "${RUST_PORT:-8080}:8080"
+    volumes:
+      # /data/logs 与 /data/files 都在这个卷里；镜像内 /data 属于 uid 10001，
+      # 新建卷时 docker 会连同属主一起复制过去
+      - qm_health_rust_data:/data
+    networks:
+      - qm_health_docker_start
+
+  qm-health-ai:
+    image: ghcr.io/zhouxingma/qm-health-ai:${AI_VERSION:-latest}
+    container_name: qm-health-ai
+    # 启动期强依赖 Postgres / Redis / QMHEALTH_URL 的 MCP 服务，缺任一就退出，
+    # 靠 restart 自动拉起，依赖就绪后自愈
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # 要等 rust 起来才能拉到 MCP 工具列表；rust 镜像内没有任何 http 客户端
+      # （curl/wget/nc 都无），没法做 healthcheck，只能用 service_started
+      qm-health-rust:
+        condition: service_started
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-qm_health}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-books123}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-books123}
+      # 应用自己的 Redis 库号，默认 1（与 rust 的 ADMIN_REDIS_DB 同库）
+      SPRING_DATA_REDIS_DATABASE: ${AI_REDIS_DB:-1}
+      # 容器间调用 rust 的地址，服务端拉 MCP 工具列表用它
+      QMHEALTH_URL: ${QMHEALTH_URL:-http://qm-health-rust:8080}
+      # 单独给前端用的 rust 地址（GET /app-config.js 下发，浏览器据此调 rust 的
+      # /admin/* 接口），必须是从浏览器所在机器能访问到的地址，所以不能用容器名
+      APP_API_RUSTBASE: ${RUST_PUBLIC_URL:-http://localhost:8080}
+      # QMHEALTH_SECURITY_KEY 故意不设：缺省用镜像内置的测试密钥，它与 02-seed.sql 里
+      # sys_app(app_code='qmhealth_ai').security_key 的内置值相同。
+      # 这是 ai 请求 rust 时的签名密钥，rust 拿 sys_app.security_key 校验，两边必须一致。
+      # 要换成自己的密钥，需同时改两处：
+      #   1) 02-seed.sql 里 sys_app 的 security_key（已建库则直接 UPDATE 那行）
+      #   2) 在 .env 里给 QMHEALTH_SECURITY_KEY 一个非空值，并取消下面这行注释
+      # 空字符串会覆盖掉内置默认值，而不是回退到它。
+      # 与 rust 的 ENCRYPTION_KEY 无关——那个是 rust 自己加密用的，不用改
+      # QMHEALTH_SECURITY_KEY: ${QMHEALTH_SECURITY_KEY}
+      LOG_LEVEL: ${AI_LOG_LEVEL:-info}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      # 容器内固定监听 8082（镜像默认 SERVER_PORT），宿主机端口由 AI_PORT 决定
+      - "${AI_PORT:-8082}:8082"
+    volumes:
+      # 日志写在 /data/logs/qm-health-ai，镜像内该目录属于 uid 10001，
+      # 新建卷时 docker 会连同属主一起复制过去
+      - qm_health_ai_data:/data/logs/qm-health-ai
+    networks:
+      - qm_health_docker_start
+
+networks:
+  # 固定网络名，方便其它业务仓库用 external: true 接进来
+  qm_health_docker_start:
+    name: qm_health_docker_start
+    driver: bridge
+
+volumes:
+  # 固定卷名，不随 compose 项目名前缀变化
+  qm_health:
+    name: qm_health
+  # qm-health-rust 的日志与上传文件，独立于数据库卷
+  qm_health_rust_data:
+    name: qm_health_rust_data
+  # qm-health-ai 的日志
+  qm_health_ai_data:
+    name: qm_health_ai_data
