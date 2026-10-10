@@ -62,7 +62,7 @@
 
    都返回 `200` 即表示应用已连上数据库与 Redis 并开始对外服务。
 
-6. 打开前端页面 <http://localhost:8082/login.html>（qm-health-ai 提供的静态页），用 `init-sql/02-seed.sql` 里的内置管理员 `admin` 登录。
+6. 打开前端页面 <http://localhost:8082/login.html>（qm-health-ai 提供的静态页），用 `init-sql/02-seed.sql` 里的内置管理员 `admin` 登录。此时 AI 对话还不能用——需要先按下面「模型配置」一节配好模型 Provider 并完成 Agent 绑定。
 
 > 若 `docker compose up` 报 `unauthorized`，说明拉不到 GHCR 上的镜像，先登录再重试：
 >
@@ -71,6 +71,34 @@
 > ```
 >
 > 两个应用镜像都是 GHCR 上的包，其中任一被设为私有就需要这一步。
+
+## 模型配置
+
+AI 模型（`ai_model_provider` + `ai_agent_model`）在管理后台**「设置 → AI 模型」**页配置，保存即写库，**无需改代码或重启容器**。
+
+后台页面由 `qm-health-ai` 提供，地址随 `.env` 里的 `AI_PORT`（默认 8082）：
+
+<http://localhost:8082/settings.html>
+
+用内置管理员 `admin` 登录后即进入该页。
+
+![模型配置步骤 1-4](docs/images/step_1-4.png)
+
+1. 左侧菜单进入**「设置」**，切到**「AI 模型」**标签页。
+2. 点**「+ 新增 Provider」**，在右侧表单填写模型服务信息后保存：
+   - **基础信息**：`code`（小写字母/数字/下划线，2–64 位，创建后不可改）、厂商族（`minimax` / `deepseek` / `openai` / `glm`）、中文名、启用开关、显示顺序、备注。
+   - **API 配置**：`baseUrl`、`endpointPath`（留空使用 AgentScope 默认值 `/v1/chat/completions`）、`apiKey`（创建必填；编辑留空则保持原值）、`model_name`、`Formatter`。
+   - **生成参数**（均可留空使用默认值）：temperature / topP / topK / maxTokens / thinkingBudget / reasoningEffort / seed / frequencyPenalty / presencePenalty，以及扩展 body / header / query JSON。
+   - **支持视觉**：开启后图片直接送主模型识别，无需 OCR 子智能体（要求 `main` 与 `ocr` 绑定同一 provider）。
+3. 点**「保存」**。
+4. 在下方**「Agent 模型绑定」**里，为 `main` / `ocr` / `mcp` / `generate_title` 各选一个 `PROVIDER_CODE`（切换后下一次请求即生效，无需重启）。
+5. 若上游全名健康 MCP 服务的工具描述或参数发生变化，回到**「系统」**标签页点**「刷新 MCP 索引」**立即重建（默认缓存 48 小时，系统每天凌晨自动重建一次）。
+
+![刷新 MCP 索引](docs/images/step_5.png)
+
+> 初始化脚本 `02-seed.sql` 已预置四条 `ai_agent_model` 绑定记录，但 `provider_code` 故意留空，由 `ModelConfigBootstrap` 在启动时补齐——所以**首次启动后仍需按上面的步骤配置至少一个 Provider 并完成绑定**，否则 AI 对话无法调用模型。
+>
+> 修改 Provider 后如需立即生效，可点「AI 模型」页的**「Reload 立即生效」**强制刷新 `ModelProviderService` 缓存；否则 60 秒 TTL 到期后自动刷新。
 
 ## 配置说明
 
@@ -341,5 +369,6 @@ networks:
 ├── compose.yaml      # 服务编排定义
 ├── .env.example      # 环境变量模板
 ├── init-sql/         # 初始化 SQL（首次启动执行一次）
+├── docs/images/      # README 引用的截图
 └── CLAUDE.md         # 面向 Claude Code 的仓库说明
 ```
