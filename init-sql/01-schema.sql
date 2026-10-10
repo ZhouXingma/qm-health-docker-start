@@ -174,7 +174,7 @@ create table users_health_indicator
     indicator_code   varchar(36)  not null,
     indicator_value  VARCHAR(255) NULL,
     reference_range  varchar(100) null,
-    indicator_status varchar(32)  null,
+    indicator_status smallint  null,
     hospital_name    VARCHAR(100) null,
     data_source      VARCHAR(20)  not null,
     measure_time     timestamp    not null,
