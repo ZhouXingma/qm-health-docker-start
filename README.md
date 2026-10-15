@@ -100,6 +100,40 @@ AI 模型（`ai_model_provider` + `ai_agent_model`）在管理后台**「设置 
 >
 > 修改 Provider 后如需立即生效，可点「AI 模型」页的**「Reload 立即生效」**强制刷新 `ModelProviderService` 缓存；否则 60 秒 TTL 到期后自动刷新。
 
+## 版本匹配
+
+三个服务需要配套使用，版本组合在下面维护。`.env` 里的 `RUST_VERSION` / `AI_VERSION` **填具体版本号，不要用 `latest`**——可变 tag 拉到的是哪一版不确定，出问题也无法按版本回退。
+
+| 组件 | 对应变量 | 版本 | 状态 | 仓库地址 |
+| --- | --- | --- | --- | --- |
+| qm-health-rust | `RUST_VERSION` | `v0.0.4` | ✅ 最新 | 暂不开源 |
+| qm-health-ai | `AI_VERSION` | `v0.0.4` | ✅ 最新 | 暂不开源 |
+| qm-healthapp | — | `v1.0` | ✅ 最新 | <https://github.com/ZhouXingma/qm-health> |
+
+对应配置：
+
+```bash
+# .env
+RUST_VERSION=v0.0.4
+AI_VERSION=v0.0.4
+```
+
+### 兼容性
+
+| rust | ai | qm-healthapp | 状态 | 说明 |
+| --- | --- | --- | --- | --- |
+| `v0.0.4` | `v0.0.4` | `v1.0` | ✅ 最新 | 当前推荐组合 |
+
+> 新版本发布时在上表追加一行，把上一行的状态改为「历史版本」保留下来，作为回退时的可选项——不要直接删行，否则失去回退依据。
+
+前后端是强耦合的：前端页面由 `qm-health-ai` 提供，app 通过 `RUST_PUBLIC_URL` 下发的 `rustApiBase` 直接调 rust 的 `/admin/*` 接口（见下），所以三者的版本要一起升，不要只升其中一个。
+
+升完之后注意 ai 不会自动重启——它手里的 MCP 工具索引可能还是旧的，需要单独重建：
+
+```bash
+docker compose up -d --force-recreate qm-health-ai
+```
+
 ## 配置说明
 
 所有可配置项都在 `.env`：
