@@ -106,23 +106,24 @@ AI 模型（`ai_model_provider` + `ai_agent_model`）在管理后台**「设置 
 
 | 组件 | 对应变量 | 版本 | 状态 | 仓库地址 |
 | --- | --- | --- | --- | --- |
-| qm-health-rust | `RUST_VERSION` | `v0.0.5` | ✅ 最新 | 暂不开源 |
-| qm-health-ai | `AI_VERSION` | `v0.0.5` | ✅ 最新 | 暂不开源 |
-| qm-healthapp | — | `v1.1` | ✅ 最新 | <https://github.com/ZhouXingma/qm-health> |
+| qm-health-rust | `RUST_VERSION` | `v0.0.6` | ✅ 最新 | 暂不开源 |
+| qm-health-ai | `AI_VERSION` | `v0.0.6` | ✅ 最新 | 暂不开源 |
+| qm-healthapp | — | `v1.2` | ✅ 最新 | <https://github.com/ZhouXingma/qm-health> |
 
 对应配置：
 
 ```bash
 # .env
-RUST_VERSION=v0.0.5
-AI_VERSION=v0.0.5
+RUST_VERSION=v0.0.6
+AI_VERSION=v0.0.6
 ```
 
 ### 兼容性
 
 | rust | ai | qm-healthapp | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
-| `v0.0.5` | `v0.0.5` | `v1.1` | ✅ 最新 | 当前推荐组合 |
+| `v0.0.6` | `v0.0.6` | `v1.2` | ✅ 最新 | 当前推荐组合 |
+| `v0.0.5` | `v0.0.5` | `v1.1` | 历史版本 | 可回退 |
 | `v0.0.4` | `v0.0.4` | `v1.0` | 历史版本 | 可回退 |
 
 > 新版本发布时在上表追加一行，把上一行的状态改为「历史版本」保留下来，作为回退时的可选项——不要直接删行，否则失去回退依据。
