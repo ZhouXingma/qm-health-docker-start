@@ -691,6 +691,8 @@ create table medical_medicine_plan
     specification_unit varchar(20)  NULL,           -- 规格单位（如：g，片、ml，瓶、g，支）
     frequency_type     smallint     NOT NULL,       -- 频次模式：1-每天, 2-循环定时, 3-每周特定日, 4-每隔N天, 5-按需
     taking_info        jsonb        NULL,           -- 服药详情（JSON结构，根据frequency_type不同而不同）
+    start_date         date         NULL,           -- 计划开始日期
+    end_date           date         NULL,           -- 计划结束日期（为空表示长期服药）
     source_type        smallint     DEFAULT 1,      -- 来源类型：1-医院处方, 2-药店购买, 3-自行添加
     medical_advice     varchar(500) NULL,           -- 医嘱/备注（如：忌辛辣、饭后服用）
     medicine_id        varchar(36)  not null,
@@ -712,6 +714,8 @@ comment on column medical_medicine_plan.specification is '规格数值';
 comment on column medical_medicine_plan.specification_unit is '规格单位';
 comment on column medical_medicine_plan.frequency_type is '频次模式';
 comment on column medical_medicine_plan.taking_info is '服药详情';
+comment on column medical_medicine_plan.start_date is '计划开始日期';
+comment on column medical_medicine_plan.end_date is '计划结束日期（NULL表示长期）';
 comment on column medical_medicine_plan.source_type is '来源类型';
 comment on column medical_medicine_plan.medical_advice is '医嘱/备注';
 comment on column medical_medicine_plan.medicine_id is '用药计划的id';
